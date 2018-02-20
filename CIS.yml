@@ -279,7 +279,7 @@
         with_items:
           - { services: 'cron' }
           - { services: 'apparmor' }
-          - { services: 'sshd' }
+          - { services: 'ssh' }
           - { services: 'apparmor' }
           - { services: 'acct' }
           - { services: 'ntp' }
