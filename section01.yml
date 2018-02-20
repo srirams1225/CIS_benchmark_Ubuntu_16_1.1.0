@@ -1,0 +1,460 @@
+---
+  - hosts:
+      - localhost
+    tasks:
+      - action: ping
+      - lineinfile:
+          path: /etc/modprobe.d/CIS.conf
+          create: yes
+          state: present
+          line: "{{item.line}}"
+        with_items: 
+          - { line: 'install cramfs /bin/true' }
+          - { line: 'install freevxfs /bin/true' }
+          - { line: 'install jffs2 /bin/true' } 
+          - { line: 'install hfs /bin/true' }
+          - { line: 'install hfsplus /bin/true' }
+          - { line: 'install udf /bin/true' }
+          - { line: 'install dccp /bin/true' }  
+          - { line: 'install sctp /bin/true' }
+          - { line: 'install rds /bin/true' }
+          - { line: 'install tipc /bin/true' }       
+      - name: Ensure to remove non-required filesystems from Modprobe 
+        modprobe:
+          name: "{{item.modprobe}}"
+          state: absent
+        with_items:
+          - { modprobe: 'crmafs' }
+          - { modprobe: 'freevxfs' }
+          - { modprobe: 'jffs2' }
+          - { modprobe: 'hfs' }
+          - { modprobe: 'hfsplus' }
+          - { modprobe: 'udf' }
+          - { modprobe: 'dccp' }
+          - { modprobe: 'sctp' }
+          - { modprobe: 'rds' }
+          - { modprobe: 'tipc' }
+      - name: Set the sticky bit on all world writable directories.
+        shell: /etc/ansible/roles/add_stickybit.bash 
+        args:
+          chdir: /etc/ansible/roles
+          creates: make_world_writable_files_sticky.txt
+          executable: /bin/bash
+      - name: Make sure autofs is disabled
+        stat: path=/etc/init.d/autofs
+        notify:
+          - Disable autofs
+      - name: Make sure  packages "{{item.packages}}" are installed.
+        apt:
+          name: "{{item.packages}}"
+          state: latest
+          install_recommends: yes
+          update_cache: yes
+        with_items:
+          - { packages: 'tcpd' }
+          - { packages: 'auditd' }
+          - { packages: 'iptables' }
+          - { packages: 'aide' }
+          - { packages: 'aide-common' }
+          - { packages: 'apparmor' }
+          - { packages: 'apparmor-utils' }
+          - { packages: 'libpam-pwquality' } 
+          - { packages: 'rkhunter' } 
+          - { packages: 'chkrootkit' } 
+          - { packages: 'logwatch' }
+          - { packages: 'fail2ban' }
+          - { packages: 'tiger' }
+          - { packages: 'clamav' }
+          - { packages: 'clamav-freshclam' }
+          - { packages: 'clamav-daemon' }
+          - { packages: 'acct' }
+          - { packages: 'rsyslog' }
+          - { packages: 'ntp' }
+      - name: Modify chkrootkit daily and update logs
+        lineinfile:
+          path: /etc/cron.daily/chkrootkit
+          regexp: '^TODAY'
+          line: "TODAY=`/bin/date +'%Y-%m-%d'` ; mv $LOG_DIR/log.today.raw $LOG_DIR/log.$TODAY.raw ; mv $LOG_DIR/log.today $LOG_DIR/log.$TODAY;"
+          state: present
+      - name: Update chkrootkit.conf opts
+        template: 
+          src: templates/chkrootkit.conf
+          dest: /etc/chkrootkit.conf 
+      - name: Mount /tmp filesystem with appropriate options
+        mount:
+          path: /tmp
+          src: none
+          fstype: tmpfs
+          opts: size=4G,rw,nosuid,noexec,nodev,relatime
+          state: mounted
+      - name: Mount /var/tmp filesystem with appropriate options
+        mount:
+          path: /var/tmp
+          src: /tmp
+          fstype: ext4
+          opts: rw,nosuid,noexec,nodev,relatime
+          state: mounted
+      - name: Mount /dev/shm filesystem with appropriate options
+        mount:
+          path: /dev/shm
+          src: none
+          fstype: tmpfs
+          opts: size=4G,rw,nosuid,noexec,nodev,relatime
+          state: mounted
+      - file:
+          path: /boot/grub/grub.cfg
+          owner: root
+          group: root
+          mode: 0400
+      - lineinfile:
+          path: /etc/security/limits.conf
+          regexp: 'hard core'
+          line: '* hard core 0'    
+      - name: grep(search) for Prelink package
+        shell: dpkg -l | grep prelink
+        ignore_errors: true
+        register: Prelink_package
+        failed_when: Prelink_package.rc == 0
+      - name: Reconfigure Prelink to defaults
+        command: prelink -ua
+        ignore_errors: true
+        when: Prelink_package|failed
+        notify: Remove Prelink
+      - name: Verify if any MAC is installed
+        shell: dpkg -s selinux>/dev/null 2>&1 || dpkg -s apparmor>/dev/null 2>&1 && echo "MAC is Present"
+        register: MAC_result
+      - debug:
+          msg: "MAC is installed"
+        when: MAC_result|succeeded
+      - name: Ensure apparmor is enabled
+        command: apparmor_status --enabled
+        register: apparmor_status
+        ignore_errors: true
+        failed_when: apparmor_status.rc == 1
+      - name: Update issue, issue.net and motd
+        template:
+          src: 'templates/warning'
+          dest: "{{item.message}}"
+        with_items: 
+          - { message: '/etc/issue' }
+          - { message: '/etc/issue.net' }
+          - { message: '/etc/motd' }  
+      - name: Task for inetd service "{{item.inetservice}}"
+        shell: sed -i '/{{item.inetservice}}/c\#This line is removed by ansible.' /etc/inetd.* ; sed -i '/{{item.inetservice}}/c\#This line is removed by ansible.' /etc/inetd.conf
+        register: inetdstatus
+        ignore_errors: true
+        failed_when: inetdstatus.rc == 0
+        with_items:
+          - { inetservice: 'chargen' }
+          - { inetservice: 'daytime' }
+          - { inetservice: 'discard' }
+          - { inetservice: 'echo' }
+          - { inetservice: 'time' }
+          - { inetservice: 'rsh' }
+          - { inetservice: 'login' }
+          - { inetservice: 'shell' }
+          - { inetservice: 'exec' }
+          - { inetservice: 'talk' }
+          - { inetservice: 'ntalk' }
+          - { inetservice: 'telnet' }
+          - { inetservice: 'tftp' }
+      - name: Disable inetd service
+        command: echo "Found inetd"
+        notify: Disable inetd service
+        when: inetdstatus|failed
+      - name: Task for xinetd service "{{item.xinetdservice}}"
+        shell: sed -i '/disable/c\disable = yes' /etc/xinetd.conf ; sed -i '/disable/c\disable = yes' /etc/xinetd.d/*
+        register: xinetdstatus
+        ignore_errors: true
+        failed_when: xinetdstatus.rc == 0
+        with_items:
+          - { xinetdservice: 'chargen' }
+          - { xinetdservice: 'daytime' }
+          - { xinetdservice: 'discard' }
+          - { xinetdservice: 'echo' }
+          - { xinetdservice: 'time' }
+          - { xinetdservice: 'rsh' }
+          - { inetservice: 'login' }
+          - { inetservice: 'shell' }
+          - { inetservice: 'exec' }
+          - { inetservice: 'talk' }
+          - { inetservice: 'ntalk' }
+          - { inetservice: 'telnet' }
+          - { inetservice: 'tftp' }
+      - name: Remove xinetd service
+        command: echo "found xinetd"
+        notify: Remove xinetd service
+        when: xinetdstatus|failed
+      - name: Remove "{{item.nonreqservice}}"
+        apt:
+          name: '"{{item.nonreqservice}}"'
+          state: absent
+          purge: yes
+          autoremove: yes
+        with_items:
+          - { nonreqservice: 'openbsd-inetd' }
+          - { nonreqservice: 'ntp' }
+          - { nonreqservice: 'chrony' }
+          - { nonreqservice: 'xserver-org' }
+          - { nonreqservice: 'nis' }
+          - { nonreqservice: 'rsh-client' }
+          - { nonreqservice: 'rsh-redone-client' }
+          - { nonreqservice: 'xserver-org' }
+          - { nonreqservice: 'talk' }
+          - { nonreqservice: 'telnet' }
+          - { nonreqservice: 'ldap-utils' }
+          - { nonreqservice: 'ntpdate' }
+          - { nonreqservice: 'telnetd-ssl' }
+          - { nonreqservice: 'inetutils-telnetd' }
+      - name: Disable non-required services
+        service:
+          name: "{{item.service}}"
+          enabled: no
+          state: stopped
+        ignore_errors: true
+        with_items:
+          - { service: 'cups' }
+          - { service: 'isc-dhcp-server' }
+          - { service: 'isc-dhcp-server6' }
+          - { service: 'slapd' }
+          - { service: 'nfs-server' }
+          - { service: 'rcpbind' }
+          - { service: 'bind9' }
+          - { service: 'vsftpd' }
+          - { service: 'dovecot' }
+          - { service: 'smbd' }
+          - { service: 'squid' }
+          - { service: 'snmpd' }
+          - { service: 'rsync' }
+          - { service: 'nis' }
+      - name: Update /etc/host.conf
+        template:
+          src: templates/host.conf
+          dest: '/etc/host.conf'
+      - name: Update sysctl.conf
+        template:
+          src: 'templates/sysctl.conf'
+          dest: '/etc/sysctl.conf'
+        notify: Reload sysctl
+      - file:
+          path: "{{item.file}}"
+          owner: root
+          group: root
+          mode: 0644
+        with_items:
+          - { file: '/etc/issue' }
+          - { file: '/etc/issue.net' }
+          - { file: '/etc/motd' }
+          - { file: '/etc/hosts.allow' }
+          - { file: '/etc/hosts.deny' }
+          - { file: '/etc/passwd' }
+          - { file: '/etc/group' }
+          - { file: '/etc/passwd-' }
+          - { file: '/etc/group-' }
+          - { file: '/etc/chkrootkit.conf' }
+          - { file: '/etc/sysctl.conf'}
+          - { file: '/etc/host.conf' }
+      - file:
+          path: "{{item.file}}"
+          owner: root
+          group: root
+          mode: 0640
+        with_items:
+          - { file: '/etc/shadow' }
+          - { file: '/etc/gshadow' }
+          - { file: '/etc/shadow-' }
+          - { file: '/etc/gshadow-' }
+      - file:
+          path: "{{item.file}}"
+          owner: root
+          group: root
+          mode: 0700
+          recurse: yes
+        with_items:
+          - { file: '/boot' }
+      - name: validate auditd.conf
+        template:
+          src: templates/auditd.conf
+          dest: /etc/audit/auditd.conf
+        notify: Reload auditd service
+      - name: add auditd block to audit.rules file
+        template:
+          src: templates/audit.rules
+          dest: /etc/audit/audit.rules
+        notify: Reload auditd service
+      - name: validate required "{{item.services}}"
+        service:
+          name: "{{item.services}}"
+          enabled: yes
+          state: started
+        with_items:
+          - { services: 'cron' }
+          - { services: 'apparmor' }
+          - { services: 'sshd' }
+          - { services: 'apparmor' }
+          - { services: 'psacct' }
+          - { services: 'ntpd' }
+          - { services: 'rsyslog' }
+      - name: update cron file permissions
+        file:
+          path: "{{item.file}}"
+          owner: root
+          group: root
+          mode: 0700
+          state: touch
+        with_items:
+          - { file: '/etc/crontab' }
+          - { file: '/etc/cron.hourly' }
+          - { file: '/etc/cron.daily' }
+          - { file: '/etc/cron.weekly' }
+          - { file: '/etc/cron.monthly' }
+          - { file: '/etc/cron.d' }
+          - { file: '/etc/at.allow' }
+          - { file: '/etc/cron.allow' }
+      - name: Modify /etc/security/pwquality.conf file
+        blockinfile:
+          path: /etc/security/pwquality.conf
+          create: yes
+          owner: root
+          group: root
+          mode: 0700
+          block: |
+             minlen = 14
+             dcredit = -1
+             ucredit = -1
+             ocredit = -1
+             lcredit = -1
+          state: present
+      - name: Modify /etc/logins.def file
+        blockinfile:
+          path: /etc/logins.def
+          create: yes
+          owner: root
+          group: root
+          mode: 0700
+          block: |
+            PASS_MAX_DAYS 90
+            PASS_MIN_DAYS 7
+            PASS_MIN_DAYS 7
+            PASS_WARN_AGE 7
+          state: present
+      - name: Validate "root" group as 0
+        command: usermod -g 0 root
+
+      - name: Modify "{{item.file}}" to make umask 027
+        lineinfile:
+          path: "{{item.file}}"
+          line: 'umask 027'
+          state: present
+        with_items:
+          - { file: '/etc/profile' }
+          - { file: '/etc/bash.bashrc' }
+
+      - name: Modify "{{item.file}}" to make 3600
+        lineinfile:
+          path: "{{item.file}}"
+          line: 'TMOUT=3600'
+          state: present
+        with_items:
+          - { file: '/etc/profile' }
+          - { file: '/etc/bash.bashrc' }
+
+      - name: Modify /etc/pam.d/common-auth file
+        lineinfile:
+          path: /etc/pam.d/common-auth
+          line: 'auth required pam_tally2.so onerr=fail audit silent deny=5 unlock_time=300'
+          state: present
+
+      - name: Modify /etc/pam.d/common-password file
+        lineinfile:
+          path: /etc/pam.d/common-password
+          line: "{{item.line}}"
+          state: present
+        with_items:
+          - { line: 'password requisite pam_pwquality.so retry=3' }
+          - { line: 'password required pam_pwhistory.so remember=5' }
+          - { line: 'password [success=1 default=ignore] pam_unix.so sha512' }
+
+      - name: Remove cron.deny and at.deny
+        file:
+          path: "{{item.file}}"
+          state: absent
+        with_items:
+          - { file: '/etc/cron.deny' }
+          - { file: '/etc/at.deny' }
+      - name: Modify sshd_config
+        template:
+          src: templates/sshd_config
+          dest: /etc/ssh/sshd_config
+          owner: root
+          group: root
+          mode: 0600
+        notify: Reload sshd service
+               
+    handlers:
+      - name: Disable autofs
+        systemd: 
+          name: autofs 
+          enabled: no
+      - name: Set suid_dumpable
+        command: sysctl -w fs.suid_dumpable=0
+      - name: Set kernel.randomize_va_space
+        command: sysctl -w kernel.randomize_va_space=2 
+      - name: Remove Prelink
+        apt:
+          name: prelink
+          state: absent
+          purge: yes
+          autoremove: yes
+      - name: Remove xinetd service
+        apt:
+          name: xinetd
+          state: absent
+          purge: yes
+          autoremove: yes
+      - name: Remove inetd service
+        apt:
+          name: inetd
+          state: absent
+          purge: yes
+          autoremove: yes
+      - name: Reload sysctl
+        shell: "{{item.command}}"
+        with_items:
+          - { command: 'sysctl -w net.ipv4.ip_forward=0' }
+          - { command: 'sysctl -w fs.suid_dumpable=0' }
+          - { command: 'sysctl -w kernel.randomize_va_space=2' }
+          - { command: 'sysctl -w net.ipv4.conf.default.secure_redirects=0' }
+          - { command: 'sysctl -w net.ipv4.conf.all.secure_redirects=0' }
+          - { command: 'sysctl -w net.ipv4.conf.all.rp_filter=1' }
+          - { command: 'sysctl -w net.ipv4.conf.default.rp_filter=1' }
+          - { command: 'sysctl -w net.ipv4.icmp_echo_ignore_broadcasts=1' }
+          - { command: 'sysctl -w net.ipv4.icmp_ignore_bogus_error_responses=1' }
+          - { command: 'sysctl -w net.ipv4.conf.all.accept_source_route=0' }
+          - { command: 'sysctl -w net.ipv6.conf.all.accept_source_route=0' }
+          - { command: 'sysctl -w net.ipv4.conf.default.accept_source_route=0' }
+          - { command: 'sysctl -w net.ipv6.conf.default.accept_source_route=0' }
+          - { command: 'sysctl -w net.ipv4.conf.all.send_redirects=0' }
+          - { command: 'sysctl -w net.ipv4.conf.default.send_redirects=0' }
+          - { command: 'sysctl -w net.ipv4.tcp_syncookies=1' }
+          - { command: 'sysctl -w net.ipv4.tcp_max_syn_backlog=2048' }
+          - { command: 'sysctl -w net.ipv4.tcp_synack_retries=2' }
+          - { command: 'sysctl -w net.ipv4.tcp_syn_retries=5' }
+          - { command: 'sysctl -w net.ipv4.conf.all.log_martians=1' }
+          - { command: 'sysctl -w net.ipv4.conf.default.log_martians=1' }
+          - { command: 'sysctl -w net.ipv4.conf.all.accept_redirects=0' }
+          - { command: 'sysctl -w net.ipv6.conf.all.accept_redirects=0' }
+          - { command: 'sysctl -w net.ipv4.conf.default.accept_redirects=0' }
+          - { command: 'sysctl -w net.ipv6.conf.default.accept_redirects=0' }
+          - { command: 'sysctl -w net.ipv4.icmp_echo_ignore_all=1' }
+          - { command: 'sysctl -w net.ipv4.route.flush=1' }
+          - { command: 'sysctl -w net.ipv6.route.flush=1' }
+      - name: Reload auditd service
+        service:
+          name: auditd
+          state: reloaded
+      - name: Reload sshd service
+        service:
+          name: ssh
+          state: reloaded
+
