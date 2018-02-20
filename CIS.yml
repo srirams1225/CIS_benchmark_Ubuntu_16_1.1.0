@@ -2,23 +2,10 @@
   - hosts:
       - localhost
     tasks:
-      - action: ping
-      - lineinfile:
-          path: /etc/modprobe.d/CIS.conf
-          create: yes
-          state: present
-          line: "{{item.line}}"
-        with_items: 
-          - { line: 'install cramfs /bin/true' }
-          - { line: 'install freevxfs /bin/true' }
-          - { line: 'install jffs2 /bin/true' } 
-          - { line: 'install hfs /bin/true' }
-          - { line: 'install hfsplus /bin/true' }
-          - { line: 'install udf /bin/true' }
-          - { line: 'install dccp /bin/true' }  
-          - { line: 'install sctp /bin/true' }
-          - { line: 'install rds /bin/true' }
-          - { line: 'install tipc /bin/true' }       
+      - name: Add file /etc/modprobe.d/CIS.conf
+        template:
+          src: templates/CIS.conf
+          dest: /etc/modprobe.d/CIS.conf
       - name: Ensure to remove non-required filesystems from Modprobe 
         modprobe:
           name: "{{item.modprobe}}"
@@ -35,11 +22,11 @@
           - { modprobe: 'rds' }
           - { modprobe: 'tipc' }
       - name: Set the sticky bit on all world writable directories.
-        shell: /etc/ansible/roles/add_stickybit.bash 
-        args:
-          chdir: /etc/ansible/roles
-          creates: make_world_writable_files_sticky.txt
-          executable: /bin/bash
+        shell: df --local -P | awk {'if (NR!=1) print $6'} | xargs -I '{}' find '{}' -xdev -type d -perm -0002 2>/dev/null | xargs chmod a+t ; 
+#       args:
+#         chdir: /etc/ansible/roles
+#         creates: make_world_writable_files_sticky.txt
+#         executable: /bin/bash
       - name: Make sure autofs is disabled
         stat: path=/etc/init.d/autofs
         notify:
@@ -127,7 +114,7 @@
           msg: "MAC is installed"
         when: MAC_result|succeeded
       - name: Ensure apparmor is enabled
-        command: apparmor_status --enabled
+        shell: apparmor_status --enabled && aa-enforce /etc/apparmor.d/* ;
         register: apparmor_status
         ignore_errors: true
         failed_when: apparmor_status.rc == 1
@@ -193,7 +180,6 @@
           autoremove: yes
         with_items:
           - { nonreqservice: 'openbsd-inetd' }
-          - { nonreqservice: 'ntp' }
           - { nonreqservice: 'chrony' }
           - { nonreqservice: 'xserver-org' }
           - { nonreqservice: 'nis' }
@@ -292,8 +278,8 @@
           - { services: 'apparmor' }
           - { services: 'sshd' }
           - { services: 'apparmor' }
-          - { services: 'psacct' }
-          - { services: 'ntpd' }
+          - { services: 'acct' }
+          - { services: 'ntp' }
           - { services: 'rsyslog' }
       - name: update cron file permissions
         file:
@@ -326,18 +312,16 @@
              lcredit = -1
           state: present
       - name: Modify /etc/logins.def file
-        blockinfile:
+        lineinfile: 
           path: /etc/logins.def
+          line: "{{item.line}}"
           create: yes
-          owner: root
-          group: root
-          mode: 0700
-          block: |
-            PASS_MAX_DAYS 90
-            PASS_MIN_DAYS 7
-            PASS_MIN_DAYS 7
-            PASS_WARN_AGE 7
           state: present
+        with_items:
+          - { line: 'PASS_MAX_DAYS 90' }
+          - { line: 'PASS_MIN_DAYS 7' }
+          - { line: 'PASS_MIN_DAYS 7' }
+          - { line: 'PASS_WARN_AGE 7' }
       - name: Validate "root" group as 0
         command: usermod -g 0 root
 
@@ -390,7 +374,15 @@
           group: root
           mode: 0600
         notify: Reload sshd service
-               
+      - name: Update all packages to the latest version
+        apt:
+          upgrade: yes
+          update_cache: yes
+      - name: Perform Dist upgrade and autoremove
+        apt:
+          upgrade: dist
+          update_cache: yes
+          autoremove: yes
     handlers:
       - name: Disable autofs
         systemd: 
