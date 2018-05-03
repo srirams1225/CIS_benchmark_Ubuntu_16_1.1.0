@@ -78,9 +78,9 @@
       - name: Mount /var/tmp filesystem with appropriate options
         mount:
           path: /var/tmp
-          src: /tmp
-          fstype: ext4
-          opts: rw,nosuid,noexec,nodev,relatime
+          src: none
+          fstype: tmpfs
+          opts: size=4G,rw,nosuid,noexec,nodev,relatime
           state: mounted
         ignore_errors: true
       - name: Mount /dev/shm filesystem with appropriate options
