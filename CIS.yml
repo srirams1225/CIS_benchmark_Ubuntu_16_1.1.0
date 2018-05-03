@@ -346,22 +346,22 @@
           - { file: '/etc/profile' }
           - { file: '/etc/bash.bashrc' }
 
-      - name: Modify /etc/pam.d/common-auth file
-        lineinfile:
-          path: /etc/pam.d/common-auth
-          line: 'auth required pam_tally2.so onerr=fail audit silent deny=5 unlock_time=300'
-          state: present
+    #  - name: Modify /etc/pam.d/common-auth file
+    #    lineinfile:
+    #      path: /etc/pam.d/common-auth
+    #      line: 'auth required pam_tally2.so onerr=fail audit silent deny=5 unlock_time=300'
+    #      state: present
 
-      - name: Modify /etc/pam.d/common-password file
-        lineinfile:
-          path: /etc/pam.d/common-password
-          line: "{{item.line}}"
-          state: present
-        with_items:
-          - { line: 'password requisite pam_pwquality.so retry=3' }
-          - { line: 'password required pam_pwhistory.so remember=5' }
-          - { line: 'password [success=1 default=ignore] pam_unix.so sha512' }
-
+#      - name: Modify /etc/pam.d/common-password file
+#        lineinfile:
+#          path: /etc/pam.d/common-password
+#          line: "{{item.line}}"
+#          state: present
+#        with_items:
+#          - { line: 'password requisite pam_pwquality.so retry=3' }
+#          - { line: 'password required pam_pwhistory.so remember=5' }
+#          - { line: 'password [success=1 default=ignore] pam_unix.so sha512' }
+#
       - name: Remove cron.deny and at.deny
         file:
           path: "{{item.file}}"
