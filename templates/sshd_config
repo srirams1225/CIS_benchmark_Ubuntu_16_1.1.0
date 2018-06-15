@@ -43,3 +43,5 @@ AllowUsers dkunkel@*
 AllowUsers git@*
 AllowUsers srirams@*
 AllowUsers prashanth@*
+Allowusers localadmin@*
+Allowusers stan@*
